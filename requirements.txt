@@ -5,3 +5,4 @@ numpy>=1.24
 plotly>=5.20
 gdown==4.6.0
 pyarrow
+matplotlib
