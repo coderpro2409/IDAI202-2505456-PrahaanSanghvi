@@ -1,6 +1,6 @@
-streamlit>=1.40
-pandas>=2.0
-numpy>=1.24
-plotly>=5.20
-matplotlib>=3.7
-gdown==6.4.2
+streamlit==1.66.1
+pandas==2.3.3
+pyarrow==22.0.0
+numpy
+plotly
+gdown==4.6.0
