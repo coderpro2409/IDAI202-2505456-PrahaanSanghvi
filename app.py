@@ -3,7 +3,9 @@ Hospital Inpatient Discharges Dashboard
 MediScope Health Analytics - Healthcare AI and Data Insights Team
 
 Run locally:  streamlit run app.py
-Data:         place the discharges CSV in ./data/ (any *.csv) or upload it in the sidebar.
+Data:         the app downloads the discharges CSV from the configured Google Drive folder
+              into ./data/ on first run. You can still upload a CSV from the sidebar to
+              override it.
 """
 
 import glob
@@ -14,11 +16,29 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
+try:
+    import gdown
+    GDOWN_AVAILABLE = True
+except ImportError:
+    GDOWN_AVAILABLE = False
+
 st.set_page_config(
     page_title="Hospital Inpatient Discharges Dashboard",
     page_icon="🏥",
     layout="wide",
 )
+
+# ----------------------------------------------------------------------------
+# GOOGLE DRIVE CONFIGURATION
+# ----------------------------------------------------------------------------
+# Folder ID taken from:
+# https://drive.google.com/drive/u/0/folders/1bHdRvwN77O3F85pFzoqmzBY2wNOabXms
+GDRIVE_FOLDER_ID = "1bHdRvwN77O3F85pFzoqmzBY2wNOabXms"
+
+# Robust base directory for local storage of the downloaded dataset
+APP_DIR = os.path.dirname(os.path.abspath(__file__)) if "__file__" in globals() else os.getcwd()
+DATA_DIR = os.path.join(APP_DIR, "data")
+
 
 # ----------------------------------------------------------------------------
 # 1. COLUMN MAPPING
@@ -280,9 +300,77 @@ def load_and_clean(source) -> tuple[pd.DataFrame, dict]:
     return df, report
 
 
+# ----------------------------------------------------------------------------
+# 2b. GOOGLE DRIVE DOWNLOAD
+# ----------------------------------------------------------------------------
+def download_data_from_gdrive(folder_id: str, output_dir: str = DATA_DIR):
+    """
+    Download every file from a public Google Drive folder into `output_dir`
+    and return the path to the largest CSV found. Returns None on failure.
+    """
+    if not GDOWN_AVAILABLE:
+        st.error(
+            "The `gdown` package is required to fetch the dataset from Google Drive. "
+            "Install it with `pip install gdown` and restart the app."
+        )
+        return None
+
+    os.makedirs(output_dir, exist_ok=True)
+    folder_url = f"https://drive.google.com/drive/folders/{folder_id}"
+
+    with st.spinner(
+        "Downloading dataset from Google Drive... "
+        "This may take a while for large files (only happens once)."
+    ):
+        try:
+            gdown.download_folder(
+                url=folder_url,
+                output=output_dir,
+                quiet=False,
+                use_cookies=False,
+            )
+        except Exception as e:
+            st.error(
+                f"Failed to download from Google Drive. "
+                f"Please verify the folder ID and that the folder is shared as "
+                f"'Anyone with the link'. Error: {e}"
+            )
+            return None
+
+    csv_files = glob.glob(os.path.join(output_dir, "*.csv"))
+    if not csv_files:
+        st.error("Google Drive download completed but no CSV file was found.")
+        return None
+
+    # Pick the largest CSV (likely the actual dataset, not a small metadata file)
+    csv_files.sort(key=os.path.getsize, reverse=True)
+    return csv_files[0]
+
+
 def find_default_file():
-    files = sorted(glob.glob(os.path.join(os.path.dirname(__file__), "data", "*.csv")))
-    return files[0] if files else None
+    """
+    Locate the dataset:
+      1. Any *.csv already sitting in ./data/
+      2. Otherwise download the Google Drive folder and pick the largest CSV.
+    """
+    local_files = sorted(
+        glob.glob(os.path.join(DATA_DIR, "*.csv")),
+        key=os.path.getsize,
+        reverse=True,
+    )
+    if local_files:
+        return local_files[0]
+
+    st.info(
+        "No local dataset found in `data/`. "
+        "Downloading from the configured Google Drive folder..."
+    )
+    downloaded = download_data_from_gdrive(GDRIVE_FOLDER_ID)
+    if downloaded:
+        st.success(f"Dataset downloaded: `{os.path.basename(downloaded)}`")
+        return downloaded
+
+    return None
 
 
 # ----------------------------------------------------------------------------
@@ -297,12 +385,17 @@ st.caption(
 with st.sidebar:
     st.header("Data")
     uploaded = st.file_uploader("Upload discharges CSV (optional)", type=["csv"])
+    st.caption(
+        f"Default source: Google Drive folder `…/{GDRIVE_FOLDER_ID[-8:]}` "
+        f"(downloaded once into `data/`)."
+    )
 
 source = uploaded if uploaded is not None else find_default_file()
 if source is None:
     st.info(
-        "No dataset found. Put the discharges CSV in a `data/` folder next to app.py "
-        "or upload it from the sidebar."
+        "No dataset found. Ensure the Google Drive folder "
+        f"`{GDRIVE_FOLDER_ID}` is shared as 'Anyone with the link', or "
+        "upload a CSV from the sidebar."
     )
     st.stop()
 
