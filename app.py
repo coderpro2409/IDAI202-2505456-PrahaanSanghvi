@@ -214,16 +214,46 @@ def map_dx_category(code) -> str:
 
 @st.cache_data(show_spinner="Loading and cleaning data...")
 def load_and_clean(source) -> tuple[pd.DataFrame, dict]:
-    """Load CSV (path or file-like) and return (clean_df, cleaning_report)."""
-    raw = pd.read_csv(source, low_memory=False)
+    # --- MEMORY OPTIMIZATION 1: Load only necessary columns ---
+    # Peek at the CSV to get the raw column names
+    peek = pd.read_csv(source, nrows=1)
+    available_cols = peek.columns.tolist()
+    
+    # Match available columns to our alias list
+    lookup = {_norm(c): c for c in available_cols}
+    cols_to_load = set()
+    for aliases in COLUMN_ALIASES.values():
+        for alias in aliases:
+            if _norm(alias) in lookup:
+                cols_to_load.add(lookup[_norm(alias)])
+                break
+                
+    # Load the dataset with ONLY the required columns
+    # dtype_backend="pyarrow" vastly reduces memory usage for strings
+    try:
+        raw = pd.read_csv(source, usecols=lambda c: c in cols_to_load, low_memory=False, dtype_backend="pyarrow")
+    except Exception:
+        # Fallback if pyarrow backend fails
+        raw = pd.read_csv(source, usecols=lambda c: c in cols_to_load, low_memory=False)
+
     report = {"raw_rows": len(raw), "raw_cols": raw.shape[1]}
 
-    df = rename_columns(raw)
+    # --- MEMORY OPTIMIZATION 2: Rename in-place to avoid duplicating the dataframe ---
+    lookup_rename = {_norm(c): c for c in raw.columns}
+    mapping = {}
+    for short, aliases in COLUMN_ALIASES.items():
+        for a in aliases:
+            if _norm(a) in lookup_rename and lookup_rename[_norm(a)] not in mapping:
+                mapping[lookup_rename[_norm(a)]] = short
+                break
+    raw.rename(columns=mapping, inplace=True)
+    df = raw
+
     missing = [c for c in REQUIRED if c not in df.columns]
     if missing:
         raise ValueError(
             f"Could not find required column(s): {missing}. "
-            f"Columns in file: {list(raw.columns)}"
+            f"Columns in file: {list(available_cols)}"
         )
 
     # Drop null-heavy columns (> 60% missing), e.g. birth weight
@@ -233,7 +263,7 @@ def load_and_clean(source) -> tuple[pd.DataFrame, dict]:
         bw = pd.to_numeric(df["birth_weight"], errors="coerce").replace(0, np.nan)
         if bw.isna().mean() > 0.60 and "birth_weight" not in dropped:
             dropped.append("birth_weight")
-    df = df.drop(columns=[c for c in dropped if c in df.columns])
+    df.drop(columns=[c for c in dropped if c in df.columns], inplace=True)
     report["dropped_columns"] = dropped
 
     # Numeric conversions
@@ -242,13 +272,13 @@ def load_and_clean(source) -> tuple[pd.DataFrame, dict]:
         df["costs"] = clean_money(df["costs"])
     df["los"] = clean_los(df["los"])
 
-    # Remove invalid records
+    # Remove invalid records (and free memory)
     before = len(df)
-    df = df.dropna(subset=["los", "charges"])
+    df.dropna(subset=["los", "charges"], inplace=True)
     report["dropped_null_numeric"] = before - len(df)
 
     before = len(df)
-    df = df[(df["los"] > 0) & (df["charges"] > 0)]
+    df = df[(df["los"] > 0) & (df["charges"] > 0)].copy() # .copy() defragments memory
     report["dropped_invalid_values"] = before - len(df)
 
     # Standardise categoricals
@@ -267,7 +297,7 @@ def load_and_clean(source) -> tuple[pd.DataFrame, dict]:
         extra = sorted(set(df["age_group"].dropna()) - set(present))
         df["age_group"] = pd.Categorical(df["age_group"], categories=present + extra, ordered=True)
 
-    # Diagnosis code -> readable category  (KEEP AS STRING - CCSR is alphanumeric)
+    # Diagnosis code -> readable category
     if "dx_code" in df.columns:
         df["dx_code"] = (
             df["dx_code"].astype("string").str.strip()
@@ -281,7 +311,7 @@ def load_and_clean(source) -> tuple[pd.DataFrame, dict]:
         else:
             df["dx_label"] = "Code " + df["dx_code"].fillna("?")
 
-    # Outlier handling: flag (not delete) extreme stays and charges using IQR x 3
+    # Outlier handling
     def iqr_flag(s: pd.Series) -> pd.Series:
         q1, q3 = s.quantile([0.25, 0.75])
         return s > q3 + 3 * (q3 - q1)
@@ -295,10 +325,13 @@ def load_and_clean(source) -> tuple[pd.DataFrame, dict]:
     df["charge_per_day"] = df["charges"] / df["los"]
     df["long_stay"] = df["los"] > df["los"].quantile(0.90)
 
+    # --- MEMORY OPTIMIZATION 3: Downcast floats to 32-bit ---
+    for col in df.select_dtypes(include=['float64']).columns:
+        df[col] = df[col].astype('float32')
+
     df = df.reset_index(drop=True)
     report["clean_rows"] = len(df)
     return df, report
-
 
 # ----------------------------------------------------------------------------
 # 2b. GOOGLE DRIVE DOWNLOAD
