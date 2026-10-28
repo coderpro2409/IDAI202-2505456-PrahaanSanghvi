@@ -215,11 +215,9 @@ def map_dx_category(code) -> str:
 @st.cache_data(show_spinner="Loading and cleaning data...")
 def load_and_clean(source) -> tuple[pd.DataFrame, dict]:
     # --- MEMORY OPTIMIZATION 1: Load only necessary columns ---
-    # Peek at the CSV to get the raw column names
     peek = pd.read_csv(source, nrows=1)
     available_cols = peek.columns.tolist()
     
-    # Match available columns to our alias list
     lookup = {_norm(c): c for c in available_cols}
     cols_to_load = set()
     for aliases in COLUMN_ALIASES.values():
@@ -228,17 +226,14 @@ def load_and_clean(source) -> tuple[pd.DataFrame, dict]:
                 cols_to_load.add(lookup[_norm(alias)])
                 break
                 
-    # Load the dataset with ONLY the required columns
-    # dtype_backend="pyarrow" vastly reduces memory usage for strings
     try:
         raw = pd.read_csv(source, usecols=lambda c: c in cols_to_load, low_memory=False, dtype_backend="pyarrow")
     except Exception:
-        # Fallback if pyarrow backend fails
         raw = pd.read_csv(source, usecols=lambda c: c in cols_to_load, low_memory=False)
 
     report = {"raw_rows": len(raw), "raw_cols": raw.shape[1]}
 
-    # --- MEMORY OPTIMIZATION 2: Rename in-place to avoid duplicating the dataframe ---
+    # --- MEMORY OPTIMIZATION 2: Rename columns (removed inplace=True) ---
     lookup_rename = {_norm(c): c for c in raw.columns}
     mapping = {}
     for short, aliases in COLUMN_ALIASES.items():
@@ -246,8 +241,9 @@ def load_and_clean(source) -> tuple[pd.DataFrame, dict]:
             if _norm(a) in lookup_rename and lookup_rename[_norm(a)] not in mapping:
                 mapping[lookup_rename[_norm(a)]] = short
                 break
-    raw.rename(columns=mapping, inplace=True)
-    df = raw
+    
+    # Reassign instead of inplace
+    df = raw.rename(columns=mapping)
 
     missing = [c for c in REQUIRED if c not in df.columns]
     if missing:
@@ -256,14 +252,15 @@ def load_and_clean(source) -> tuple[pd.DataFrame, dict]:
             f"Columns in file: {list(available_cols)}"
         )
 
-    # Drop null-heavy columns (> 60% missing), e.g. birth weight
+    # Drop null-heavy columns (removed inplace=True)
     null_share = df.isna().mean()
     dropped = null_share[null_share > 0.60].index.tolist()
     if "birth_weight" in df.columns:
         bw = pd.to_numeric(df["birth_weight"], errors="coerce").replace(0, np.nan)
         if bw.isna().mean() > 0.60 and "birth_weight" not in dropped:
             dropped.append("birth_weight")
-    df.drop(columns=[c for c in dropped if c in df.columns], inplace=True)
+            
+    df = df.drop(columns=[c for c in dropped if c in df.columns])
     report["dropped_columns"] = dropped
 
     # Numeric conversions
@@ -272,13 +269,13 @@ def load_and_clean(source) -> tuple[pd.DataFrame, dict]:
         df["costs"] = clean_money(df["costs"])
     df["los"] = clean_los(df["los"])
 
-    # Remove invalid records (and free memory)
+    # Remove invalid records (removed inplace=True)
     before = len(df)
-    df.dropna(subset=["los", "charges"], inplace=True)
+    df = df.dropna(subset=["los", "charges"])
     report["dropped_null_numeric"] = before - len(df)
 
     before = len(df)
-    df = df[(df["los"] > 0) & (df["charges"] > 0)].copy() # .copy() defragments memory
+    df = df[(df["los"] > 0) & (df["charges"] > 0)].copy()
     report["dropped_invalid_values"] = before - len(df)
 
     # Standardise categoricals
@@ -332,7 +329,6 @@ def load_and_clean(source) -> tuple[pd.DataFrame, dict]:
     df = df.reset_index(drop=True)
     report["clean_rows"] = len(df)
     return df, report
-
 # ----------------------------------------------------------------------------
 # 2b. GOOGLE DRIVE DOWNLOAD
 # ----------------------------------------------------------------------------
