@@ -3,7 +3,7 @@
 **Course:** Mathematics for AI-II (Artificial Intelligence) | **Assessment:** Summative Assessment, Scenario 2
 **Client scenario:** MediScope Health Analytics, Healthcare AI and Data Insights Team
 
-**Live app:** `<paste your Streamlit Cloud URL here>`
+**Live app:** `https://idai202-2505456-prahaansanghvi-ehu96tdbtkoajogb9gquag.streamlit.app/`
 **Student:** `Prahaan Pratik Sanghvi` | **Student ID:** `2505456` | **Registration no.:** `1000332`
 
 
@@ -64,8 +64,7 @@ Dataset: Hospital Inpatient Discharges (provided in the assignment Drive folder)
 ├── requirements.txt    # Dependencies for Streamlit Cloud
 ├── INSIGHTS.md         # Research questions, methodology and findings
 ├── README.md
-├── data/               # Put the discharges CSV here
-└── screenshots/        # Dashboard screenshots
+
 ```
 
 ## 5. Run locally
