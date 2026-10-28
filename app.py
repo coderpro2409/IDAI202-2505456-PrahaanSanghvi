@@ -569,8 +569,14 @@ with tab_cost:
     else:
         st.subheader("Total charges by severity of illness")
         log_scale = st.checkbox("Log scale (recommended - charges are heavily skewed)", value=True)
+        
+        # Create a safe subset for the box plot to prevent OOM crashes
+        box_df = f.dropna(subset=["severity"])
+        if len(box_df) > 20000:
+            box_df = box_df.sample(20000, random_state=42)
+            
         fig = px.box(
-            f.dropna(subset=["severity"]), x="severity", y="charges", color="severity",
+            box_df, x="severity", y="charges", color="severity",
             category_orders={"severity": SEVERITY_ORDER},
             labels={"charges": "Total charges ($)", "severity": "Severity"},
             log_y=log_scale, points=False,
