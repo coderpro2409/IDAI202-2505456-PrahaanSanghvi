@@ -578,7 +578,7 @@ with tab_cost:
             box_df, x="severity", y="charges", color="severity",
             category_orders={"severity": SEVERITY_ORDER},
             labels={"charges": "Total charges ($)", "severity": "Severity"},
-            log_y=log_scale, points=False,
+            log_y=True, points=False,
         )
         st.plotly_chart(fig, width="stretch")
         sev = (
