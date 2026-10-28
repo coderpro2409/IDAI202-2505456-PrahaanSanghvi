@@ -568,8 +568,7 @@ with tab_cost:
         st.info("No severity column in this dataset.")
     else:
         st.subheader("Total charges by severity of illness")
-        log_scale = st.checkbox("Log scale (recommended - charges are heavily skewed)", value=True)
-        
+      
         # Create a safe subset for the box plot to prevent OOM crashes
         box_df = f.dropna(subset=["severity"])
         if len(box_df) > 20000:
